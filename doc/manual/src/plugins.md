@@ -98,15 +98,52 @@ configuration options:
 
 Sets GitHub CI status.
 
-configuration options:
+### Configuration options
 
 - `githubstatus.[].jobs`
+
+Regular expression for jobs to match in the format `project:jobset:job`.
+Defaults to `*:*:*`.
+
 - `githubstatus.[].excludeBuildFromContext`
+
+Don't include the build's ID in the status.
+
 - `githubstatus.[].context`
+
+Context shown in the status
+
 - `githubstatus.[].useShortContext`
+
+Renames `continuous-integration/hydra` to `ci/hydra` and removes the PR suffix
+from the name. Useful to see the full path in GitHub for long job names.
+
 - `githubstatus.[].description`
+
+Description shown in the status. Defaults to `Hydra build #<build-id> of
+<jobname>`
+
 - `githubstatus.[].inputs`
+
+The input which corresponds to the github repo/rev whose
+status we want to report. Can be repeated.
+
 - `githubstatus.[].authorization`
+
+Verbatim contents of the Authorization header. See
+[GitHub documentaion](https://developer.github.com/v3/#authentication) for
+details.
+
+### Example
+
+```xml
+<githubstatus>
+  jobs = test:pr:build
+  inputs = src
+  authorization = Basic notgivingyoumypasswordosorry
+  excludeBuildFromContext = 1
+</githubstatus>
+```
 
 ## Gitlab pulls
 
