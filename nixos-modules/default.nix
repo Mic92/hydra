@@ -1,13 +1,11 @@
-{ self }:
+{ self, lib }:
 
 {
-  hydra = { pkgs, lib,... }: {
-    _file = ./default.nix;
-    imports = [ ./hydra.nix ];
-    services.hydra-dev.package = lib.mkDefault self.packages.${pkgs.hostPlatform.system}.hydra;
+  hydra = lib.modules.importApply ./hydra.nix {
+    inherit self;
   };
 
-  hydraTest = { pkgs, ... }: {
+  hydraTest = {
     services.hydra-dev.enable = true;
     services.hydra-dev.hydraURL = "http://hydra.example.org";
     services.hydra-dev.notificationSender = "admin@hydra.example.org";

@@ -1,3 +1,4 @@
+{ hydraPackage }:
 { config, pkgs, lib ? pkgs.lib, ... }:
 
 with lib;
@@ -41,9 +42,7 @@ in
 {
   ###### interface
   options = {
-
-    services.hydra-dev = rec {
-
+    services.hydra-dev = {
       enable = mkOption {
         type = types.bool;
         default = false;
@@ -68,6 +67,7 @@ in
 
       package = mkOption {
         type = types.path;
+        default = hydraPackage;
         description = "The Hydra package.";
       };
 

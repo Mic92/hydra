@@ -114,6 +114,7 @@
 
       nixosModules = import ./nixos-modules {
         inherit self;
+        inherit (nixpkgs) lib;
       };
 
       nixosConfigurations.container = nixpkgs.lib.nixosSystem {
