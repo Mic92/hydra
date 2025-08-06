@@ -189,6 +189,40 @@ function requestFile(args) {
 
 function requestJSON(args) {
     args.dataType = 'json';
+
+    // Add CSRF token to all requests
+    var csrfToken = $('meta[name="csrf-token"]').attr('content');
+    if (csrfToken) {
+        // Add to request headers
+        if (!args.headers) {
+            args.headers = {};
+        }
+        args.headers['X-CSRF-Token'] = csrfToken;
+
+        // Also add to form data for POST/PUT/DELETE requests
+        if (args.type && ['POST', 'PUT', 'DELETE'].indexOf(args.type.toUpperCase()) !== -1) {
+            if (args.data) {
+                if (typeof args.data === 'string') {
+                    // If data is already a string, parse it and add csrf_token
+                    try {
+                        var parsedData = JSON.parse(args.data);
+                        parsedData.csrf_token = csrfToken;
+                        args.data = JSON.stringify(parsedData);
+                    } catch (e) {
+                        // If not JSON, append as form data
+                        args.data += '&csrf_token=' + encodeURIComponent(csrfToken);
+                    }
+                } else if (typeof args.data === 'object') {
+                    // If data is an object, add csrf_token property
+                    args.data.csrf_token = csrfToken;
+                }
+            } else {
+                // If no data, create new data object with csrf_token
+                args.data = { csrf_token: csrfToken };
+            }
+        }
+    }
+
     requestFile(args);
 };
 

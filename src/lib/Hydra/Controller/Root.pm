@@ -49,6 +49,11 @@ sub noLoginNeeded {
 sub begin :Private {
     my ($self, $c, @args) = @_;
 
+    # Generate CSRF token if session exists but no token yet
+    if ($c->sessionid && !$c->session->{csrf_token}) {
+        $c->session->{csrf_token} = Hydra::Helper::CSRF::generate_token($c->sessionid);
+    }
+
     $c->stash->{curUri} = $c->request->uri;
     $c->stash->{version} = $ENV{"HYDRA_RELEASE"} || "<devel>";
     $c->stash->{nixVersion} = $ENV{"NIX_RELEASE"} || "<devel>";
@@ -59,6 +64,9 @@ sub begin :Private {
     $c->stash->{flashMsg} = $c->flash->{flashMsg};
     $c->stash->{successMsg} = $c->flash->{successMsg};
     $c->stash->{localStore} = isLocalStore;
+
+    # Make CSRF token available to templates
+    $c->stash->{csrf_token} = $c->session->{csrf_token} if $c->sessionid;
 
     $c->stash->{isPrivateHydra} = $c->config->{private} // "0" ne "0";
 
@@ -83,15 +91,29 @@ sub begin :Private {
     };
     $_->supportedInputTypes($c->stash->{inputTypes}) foreach @{$c->hydra_plugins};
 
-    # XSRF protection: require POST requests to have the same origin.
-    if ($c->req->method eq "POST" && $c->req->path ne "api/push-github" && $c->req->path ne "api/push-gitea") {
+    # CSRF protection for state-changing requests
+    if ($c->req->method =~ /^(POST|PUT|DELETE)$/ &&
+        $c->req->path ne "api/push-github" &&
+        $c->req->path ne "api/push-gitea" &&
+        !($c->req->path =~ /^api\// && $c->req->header('Authorization'))) {
+
+        # First check origin/referer
         my $referer = $c->req->header('Referer');
         $referer //= $c->req->header('Origin');
         my $base = $c->req->base;
         die unless $base =~ /\/$/;
-        $referer .= "/";
-        error($c, "POST requests should come from ‘$base’.")
+        $referer .= "/" if defined $referer;
+        error($c, "POST requests should come from '$base'.")
             unless defined $referer && substr($referer, 0, length $base) eq $base;
+
+        # Then validate CSRF token
+        my $provided_token = $c->req->param(Hydra::Helper::CSRF::get_token_field_name()) ||
+                           $c->req->header('X-CSRF-Token');
+        my $session_token = $c->session->{csrf_token};
+
+        unless (Hydra::Helper::CSRF::validate_token($provided_token, $session_token)) {
+            error($c, "Invalid or missing CSRF token.");
+        }
     }
 
     $c->forward('deserialize');

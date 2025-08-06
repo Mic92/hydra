@@ -24,6 +24,10 @@
 <form action="[% c.uri_for('/admin/news/submit') %]" method="post">
   <div class="page-header">Add news item</div>
 
+  [% IF csrf_token %]
+    <input type="hidden" name="csrf_token" value="[% csrf_token %]" />
+  [% END %]
+
   <div class="form-group">
     <label for="newscontents">News text (HTML)</label>
     <textarea class="form-control" id="newscontents" name="contents"></textarea>

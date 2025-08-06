@@ -16,6 +16,10 @@
       <meta name="google-signin-client_id" content="[% c.config.google_client_id %]">
     [% END %]
 
+    [% IF csrf_token %]
+      <meta name="csrf-token" content="[% csrf_token %]">
+    [% END %]
+
     [% tracker %]
 
   </head>

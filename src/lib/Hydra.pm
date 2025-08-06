@@ -7,6 +7,7 @@ use Moose;
 use Hydra::Plugin;
 use Hydra::Model::DB;
 use Hydra::Config qw(getLDAPConfigAmbient);
+use Hydra::Helper::CSRF;
 use Catalyst::Runtime '5.70';
 use Catalyst qw/ConfigLoader
                 Static::Simple
