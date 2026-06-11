@@ -166,6 +166,10 @@ pub enum RemoteStoreBackend {
 #[allow(missing_debug_implementations)]
 pub struct State {
     pub pool: harmonia_store_remote::ConnectionPool,
+    /// Pool reserved for NAR uploads. Uploads stream large NARs and hold a
+    /// daemon connection for minutes; on a shared pool they starve short
+    /// control RPCs (`HasPath`, `FetchRequisites`) and stall dispatch.
+    pub upload_pool: harmonia_store_remote::ConnectionPool,
     pub remote_stores: parking_lot::RwLock<Vec<RemoteStoreBackend>>,
     pub config: App,
     pub cli: Cli,
@@ -285,8 +289,15 @@ impl State {
             None
         };
 
+        let upload_pool = harmonia_store_remote::ConnectionPool::with_store_dir(
+            &nix_config.socket,
+            store_dir.clone(),
+            harmonia_store_remote::PoolConfig::default(),
+        );
+
         Ok(Arc::new(Self {
             pool,
+            upload_pool,
             remote_stores: parking_lot::RwLock::new(remote_stores),
             cli,
             db,
@@ -1265,7 +1276,7 @@ impl State {
         let task = tokio::task::spawn({
             async move {
                 loop {
-                    let local_store = self.pool.clone();
+                    let local_store = self.upload_pool.clone();
                     let s3_stores: Vec<binary_cache::S3BinaryCacheClient> = {
                         let r = self.remote_stores.read();
                         r.iter()
