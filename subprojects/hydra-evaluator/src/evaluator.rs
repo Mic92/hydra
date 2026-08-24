@@ -441,7 +441,7 @@ impl Evaluator {
         self.db
             .get()
             .await?
-            .set_jobset_start_time(jobset_id, now_epoch_i32())
+            .set_jobset_start_time(jobset_id, epoch_i32(now))
             .await
             .wrap_err("failed to set startTime")?;
 
@@ -490,6 +490,7 @@ impl Evaluator {
                 kill_rx,
                 jobset_id,
                 jobset_display,
+                now,
                 eval_one,
                 db,
                 state_arc,
@@ -518,6 +519,7 @@ async fn reap_child(
     mut kill_rx: tokio::sync::oneshot::Receiver<()>,
     jobset_id: i32,
     jobset_display: String,
+    start_time: i64,
     eval_one: bool,
     db: db::Database,
     state: Arc<Mutex<State>>,
@@ -547,7 +549,12 @@ async fn reap_child(
 
     let mut st = state.lock().await;
     let exit_ok = if let Some(jobset) = st.jobsets.get_mut(&jobset_id) {
-        jobset.trigger_time = None;
+        // A trigger that arrived while the eval was running is kept in the
+        // database (see update_jobset_after_eval); keep it in memory too so
+        // the jobset is re-evaluated without waiting for another NOTIFY.
+        if jobset.trigger_time.is_some_and(|t| t <= start_time) {
+            jobset.trigger_time = None;
+        }
         jobset.last_checked_time = now;
         exit_ok
     } else {
@@ -591,11 +598,7 @@ async fn update_db_after_eval(
     let error_msg = (!exit_ok).then(|| format!("evaluation {status_str}"));
     db.get()
         .await?
-        .update_jobset_after_eval(
-            jobset_id,
-            error_msg.as_deref(),
-            i32::try_from(now).unwrap_or(i32::MAX),
-        )
+        .update_jobset_after_eval(jobset_id, error_msg.as_deref(), epoch_i32(now))
         .await?;
     Ok(())
 }
@@ -608,10 +611,10 @@ fn now_epoch() -> i64 {
         .unwrap_or(0)
 }
 
-/// Current epoch narrowed to the INT4 width used by Hydra's schema.
+/// Narrow an epoch to the INT4 width used by Hydra's schema.
 /// Saturates at `i32::MAX` (the schema has a pre-existing Y2038 limit).
-fn now_epoch_i32() -> i32 {
-    i32::try_from(now_epoch()).unwrap_or(i32::MAX)
+fn epoch_i32(epoch: i64) -> i32 {
+    i32::try_from(epoch).unwrap_or(i32::MAX)
 }
 
 fn is_broken_connection(e: &eyre::Report) -> bool {
