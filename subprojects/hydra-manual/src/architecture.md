@@ -65,6 +65,8 @@ graph BT
     nix-support --> store-path-utils
     db --> nix-support
     hydra-proto --> nix-support
+    hydra-evaluator --> db
+    hydra-evaluator --> hydra-tracing
     store-transfer --> daemon-client-utils
     store-transfer --> hydra-proto
     hydra-builder --> binary-cache
