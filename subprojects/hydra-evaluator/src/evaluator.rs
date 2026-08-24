@@ -546,10 +546,16 @@ async fn reap_child(
     let now = now_epoch();
 
     let mut st = state.lock().await;
-    if let Some(jobset) = st.jobsets.get_mut(&jobset_id) {
+    let exit_ok = if let Some(jobset) = st.jobsets.get_mut(&jobset_id) {
         jobset.trigger_time = None;
         jobset.last_checked_time = now;
-    }
+        exit_ok
+    } else {
+        // The jobset was disabled or deleted mid-eval and its child
+        // killed by read_jobsets; only clear startTime and do not record
+        // the SIGKILL as an evaluation error.
+        true
+    };
 
     // Hold the lock across the DB cleanup and only mark the jobset
     // not-running afterwards (as the C++ reaper did), so a new eval
