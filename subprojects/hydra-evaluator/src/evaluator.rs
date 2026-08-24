@@ -545,30 +545,31 @@ async fn reap_child(
 
     let now = now_epoch();
 
-    {
-        let mut st = state.lock().await;
-        if let Some(jobset) = st.jobsets.get_mut(&jobset_id) {
-            jobset.trigger_time = None;
-            jobset.last_checked_time = now;
-        }
-
-        // Hold the lock across the DB cleanup and only mark the jobset
-        // not-running afterwards (as the C++ reaper did), so a new eval
-        // of the same jobset cannot start in between and have its fresh
-        // startTime clobbered by this transaction.
-        if let Err(e) = update_db_after_eval(&db, jobset_id, exit_ok, &status_str, now).await {
-            tracing::error!("exception setting jobset error: {e:#}");
-        }
-
-        if st.running_evals > 0 {
-            st.running_evals -= 1;
-        }
-        st.running_ids.remove(&jobset_id);
-        st.kill_evals.remove(&jobset_id);
+    let mut st = state.lock().await;
+    if let Some(jobset) = st.jobsets.get_mut(&jobset_id) {
+        jobset.trigger_time = None;
+        jobset.last_checked_time = now;
     }
+
+    // Hold the lock across the DB cleanup and only mark the jobset
+    // not-running afterwards (as the C++ reaper did), so a new eval
+    // of the same jobset cannot start in between and have its fresh
+    // startTime clobbered by this transaction.
+    if let Err(e) = update_db_after_eval(&db, jobset_id, exit_ok, &status_str, now).await {
+        tracing::error!("exception setting jobset error: {e:#}");
+    }
+
+    if st.running_evals > 0 {
+        st.running_evals -= 1;
+    }
+    st.running_ids.remove(&jobset_id);
+    st.kill_evals.remove(&jobset_id);
 
     notify_work.notify_one();
 
+    // Exit while still holding the lock: start_evals skips should_evaluate
+    // in eval-one mode, so a woken main loop could otherwise start a second
+    // eval of the jobset before the process is gone.
     if eval_one {
         std::process::exit(0);
     }
