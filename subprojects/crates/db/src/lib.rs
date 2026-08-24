@@ -156,13 +156,80 @@ impl Database {
         + Unpin,
     > {
         let mut listener = sqlx::postgres::PgListener::connect_with(&self.pool).await?;
-        // With eager reconnect (the default), sqlx silently swallows
-        // connection loss and NOTIFYs sent during the gap are dropped
-        // without the stream ever yielding an item — callers can neither
-        // resync nor exit. Surface disconnects as stream errors instead;
-        // the stream still reconnects lazily on the next poll.
-        listener.eager_reconnect(false);
         listener.listen_all(channels).await?;
-        Ok(listener.into_stream())
+        // `PgListener::recv`/`into_stream` reconnect transparently on
+        // connection loss, so NOTIFYs sent during the gap are dropped
+        // without the stream ever yielding an item and callers can neither
+        // resync nor exit. `try_recv` reports the loss as `Ok(None)`;
+        // turn it into a stream error so callers resync. The listener
+        // reconnects on the next poll.
+        Ok(Box::pin(futures::stream::unfold(
+            listener,
+            |mut listener| async move {
+                let item = match listener.try_recv().await {
+                    Ok(Some(notification)) => Ok(notification),
+                    Ok(None) => Err(sqlx::Error::Io(std::io::Error::new(
+                        std::io::ErrorKind::ConnectionReset,
+                        "connection to postgres lost, notifications may have been missed",
+                    ))),
+                    Err(e) => Err(e),
+                };
+                Some((item, listener))
+            },
+        )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use futures::StreamExt as _;
+
+    use super::Database;
+
+    async fn notify(db: &Database, channel: &str) {
+        let mut conn = db.get().await.unwrap();
+        sqlx::query(&format!("NOTIFY {channel}"))
+            .execute(conn.raw())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn listener_reports_lost_connection() {
+        let (pg, _pool) = test_utils::TestPg::new().await;
+        let db = Database::new(&pg.url(), 4).await.unwrap();
+        let mut stream = db.listener(vec!["hydra_test"]).await.unwrap();
+
+        notify(&db, "hydra_test").await;
+        assert!(stream.next().await.unwrap().is_ok());
+
+        // Kill the backend that holds the LISTEN; a NOTIFY sent now would
+        // be lost, so the stream must report this instead of hiding it.
+        let mut conn = db.get().await.unwrap();
+        sqlx::query(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+             WHERE datname = current_database() AND pid <> pg_backend_pid()",
+        )
+        .execute(conn.raw())
+        .await
+        .unwrap();
+        drop(conn);
+
+        assert!(stream.next().await.unwrap().is_err());
+
+        // The listener re-subscribes on the next poll.
+        let next = stream.next();
+        tokio::pin!(next);
+        let item = loop {
+            tokio::select! {
+                item = &mut next => break item.unwrap(),
+                () = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
+                    notify(&db, "hydra_test").await;
+                }
+            }
+        };
+        assert_eq!(item.unwrap().channel(), "hydra_test");
     }
 }
